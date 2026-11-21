@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ujian Online</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{background:#fafaf9;color:#1c1917;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) body{background:#fafaf9;color:#1c1917}}
+.sheet{background:#fff;border:1px solid #e7e5e4;border-radius:14px}
+[contenteditable=true]{outline:1px dashed #059669;outline-offset:2px}
+@media print{.np{display:none!important}body{background:#fff}.sheet{border:0!important}:root{padding:0}}
+</style></head>
+<body><div id="root"></div>
+<script>
+const {useState,useEffect,useRef}=React, h=React.createElement;
+/* === ISI DUA BARIS INI DARI SUPABASE (Project Settings > API) === */
+const SUPA={url:'https://hmneqrdzezlykecdyicr.supabase.co',key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhtbmVxcmR6ZXpseWtlY2R5aWNyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUyNDQ2MDAsImV4cCI6MjExMDgyMDYwMH0.UVfD3VgHzc5-OOfY_ykRZsoBtpk-3Qg3IU4fvtYEfHw'};
+const EM=u=>u.trim().toLowerCase()+'@ujian.id';
+let SESS=(()=>{try{return JSON.parse(localStorage.getItem('ujian-sess'))}catch(e){return null}})();
+const saveS=s=>{SESS=s;try{s?localStorage.setItem('ujian-sess',JSON.stringify(s)):localStorage.removeItem('ujian-sess')}catch(e){}};
+const mk=r=>({token:r.access_token,refresh:r.refresh_token,exp:Date.now()+(r.expires_in||3600)*1000,uid:r.user.id});
+async function auth(path,body){const r=await fetch(SUPA.url+'/auth/v1/'+path,{method:'POST',headers:{apikey:SUPA.key,'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error(j.msg||j.error_description||j.message||'Gagal');return j}
+async function api(path,o={}){
+  if(SESS&&SESS.exp-Date.now()<6e4){try{saveS(mk(await auth('token?grant_type=refresh_token',{refresh_token:SESS.refresh})))}catch(e){saveS(null);location.reload()}}
+  const r=await fetch(SUPA.url+'/rest/v1/'+path,{...o,headers:{apikey:SUPA.key,Authorization:'Bearer '+(SESS?SESS.token:SUPA.key),'Content-Type':'application/json',...(o.headers||{})}});
+  if(!r.ok)throw new Error(await r.text());const t=await r.text();return t?JSON.parse(t):null}
+const upsert=(c,id,data)=>api('docs?on_conflict=coll,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{coll:c,id,data}])});
+const CATS=['Harian','Mid','Akhir'], COL=['users','questions','exams','results'];
+const uid=()=>Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
+const fmt=t=>new Date(t).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'});
+const fmtD=t=>new Date(t).toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'});
+const toL=t=>new Date(t-new Date(t).getTimezoneOffset()*6e4).toISOString().slice(0,16);
+const pred=s=>s>=90?'Istimewa':s>=80?'Sangat Baik':s>=70?'Baik':'Cukup';
+const avg=a=>a.length?Math.round(a.reduce((x,y)=>x+y,0)/a.length*10)/10:0;
+const LS={get(){try{return JSON.parse(localStorage.getItem('ujian-v1'))}catch(e){return null}},set(v){try{localStorage.setItem('ujian-v1',JSON.stringify(v))}catch(e){}}};
+const SS={get(){try{return sessionStorage.getItem('me')}catch(e){return null}},set(v){try{v?sessionStorage.setItem('me',v):sessionStorage.removeItem('me')}catch(e){}}};
+const inp="w-full border border-stone-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-emerald-600";
+const bP="bg-emerald-700 text-white rounded-lg px-4 py-2 text-sm hover:bg-emerald-800 disabled:opacity-40";
+const bS="border border-stone-300 rounded-lg px-3 py-1.5 text-sm hover:bg-stone-100 bg-white";
+const B=(p,...c)=>h('button',{type:'button',...p},...c);
+const L=(t,...c)=>h('label',{className:'block text-xs text-stone-500 mb-1'},t,...c);
+
+function seedData(){
+  const now=Date.now(),day=864e5,q=(id,cat,text,options,answer,weight=1,type='pg')=>({id,cat,text,options,answer,weight,type});
+  const qs=[
+   q('q1','Harian','Nun mati bertemu huruf ba (ب) dibaca dengan hukum...',['Izhar','Iqlab','Idgham','Ikhfa'],1),
+   q('q2','Harian','Berapa harakat panjang mad thabi\'i?',['2','4','5','6'],0),
+   q('q3','Harian','Sebutkan hukum bacaan nun mati bertemu huruf hamzah (ء).',[],'izhar',2,'isian'),
+   q('q4','Mid','Idgham bighunnah terjadi bila nun mati/tanwin bertemu salah satu huruf...',['ي ن م و','ل ر','ء ه ع ح غ خ','ب'],0),
+   q('q5','Mid','Mad wajib muttasil dibaca...',['2 harakat','4–5 harakat','1 harakat','8 harakat'],1),
+   q('q6','Mid','Makna إِنَّ سَعْيَكُمْ لَشَتَّى (Al-Lail: 4) adalah usaha kalian...',['sama','berbeda-beda','sia-sia','pasti berhasil'],1,2),
+   q('q7','Akhir','Surah yang berisi perintah salat dan berkurban adalah...',['Al-Ikhlas','Al-Kautsar','An-Nasr','Al-Fil'],1),
+   q('q8','Akhir','Dengan apa Allah bersumpah pada awal surah At-Tin?',['Matahari dan bulan','Tin dan zaitun','Malam dan siang','Fajar'],1),
+   q('q9','Akhir','Nama lain surah Al-Ikhlas yang menegaskan keesaan Allah: lafal "Ash-...".',[],'shamad',2,'isian')];
+  const ex=(id,cat,title,ids,ann)=>({id,cat,title,qids:ids,start:now-day,end:now+365*day,duration:cat==='Harian'?10:20,kkm:70,announced:ann});
+  const rs=(id,u,e,s,ans)=>({id,uid:u,eid:e,start:now-2*day,date:now-2*day,status:'done',score:s,answers:ans});
+  return {users:[{id:'u_admin',name:'Ustadz Pengajar',username:'admin',password:'admin123',role:'admin'},
+   {id:'u_1',name:'Ahmad Fauzi',username:'siswa1',password:'siswa123',role:'peserta'},
+   {id:'u_2',name:'Siti Aisyah',username:'siswa2',password:'siswa123',role:'peserta'}],
+   questions:qs,
+   exams:[ex('e_h','Harian','Ulangan Harian Tajwid',['q1','q2','q3'],true),ex('e_m','Mid','Ujian Tengah Semester',['q4','q5','q6'],false),ex('e_a','Akhir','Ujian Akhir Semester',['q7','q8','q9'],false)],
+   results:[rs('r1','u_2','e_h',100,{q1:1,q2:0,q3:'izhar'}),rs('r2','u_1','e_h',60,{q1:1,q2:1,q3:'iqlab'})]};
+}
+const scoreOf=(qs,ans)=>{let t=0,g=0;qs.forEach(x=>{t+=+x.weight||0;if(ok(x,ans[x.id]))g+=+x.weight||0});return t?Math.round(g/t*1000)/10:0};
+const ok=(q,a)=>q.answer!==undefined&&a!==undefined&&a!==''&&(q.type==='pg'?+a===+q.answer:String(a).trim().toLowerCase()===String(q.answer).trim().toLowerCase());
+
+function Card(p,...c){return h('div',{className:'sheet p-5 '+(p.cls||''),...(p.o||{})},...c)}
+function Title(t,sub,...r){return h('div',{className:'flex flex-wrap items-end justify-between gap-3 mb-5 np'},h('div',null,h('h1',{className:'text-xl font-semibold'},t),sub&&h('p',{className:'text-sm text-stone-500'},sub)),h('div',{className:'flex gap-2'},...r))}
+
+function App(){
+  const [d,setD]=useState({users:[],questions:[],exams:[],results:[]});
+  const [err,setErr]=useState(''),[uidS,setUid]=useState(SESS?SESS.uid:null),[ready,setReady]=useState(!SESS),[pg,setPg]=useState({n:'dash'});
+  const dr=useRef(d),rec=useRef({});dr.current=d;
+  useEffect(()=>{if(!uidS)return;let alive=true;
+    const sync=async()=>{try{const rows=await api('docs?select=coll,id,data');if(!alive)return;
+      const n={users:[],questions:[],exams:[],results:[]},K={};
+      rows.forEach(w=>{if(w.coll==='keys')K[w.id]=w.data.answer;else if(n[w.coll])n[w.coll].push({...w.data,id:w.id})});
+      n.questions=n.questions.map(q=>K[q.id]!==undefined?{...q,answer:K[q.id]}:q);
+      const now=Date.now();Object.keys(rec.current).forEach(k=>{if(now-rec.current[k]>8000){delete rec.current[k];return}
+        const [c,id]=k.split('/'),loc=dr.current[c].find(z=>z.id===id);n[c]=n[c].filter(z=>z.id!==id);if(loc)n[c].push(loc)});
+      setErr('OK: '+rows.length+' baris diterima dari database');setD(n);setReady(true)}catch(e){if(alive){setErr(String(e.message||e).slice(0,400));setReady(true)}}};
+    sync();const t=setInterval(sync,4000);return()=>{alive=false;clearInterval(t)}},[uidS]);
+  const upd=(c,o)=>{rec.current[c+'/'+o.id]=Date.now();setD(p=>({...p,[c]:p[c].some(x=>x.id===o.id)?p[c].map(x=>x.id===o.id?o:x):[...p[c],o]}))};
+  const bad=()=>alert('Gagal menyimpan ke database. Periksa koneksi atau izin akun Anda.');
+  const put=(c,o)=>{o={...o,id:o.id||uid()};upd(c,o);
+    if(c==='questions'){const {answer,...qq}=o;upsert('questions',o.id,qq).then(()=>upsert('keys',o.id,{answer})).catch(bad)}else upsert(c,o.id,o).catch(bad);return o};
+  const rm=(c,id)=>{rec.current[c+'/'+id]=Date.now();setD(p=>({...p,[c]:p[c].filter(x=>x.id!==id)}));
+    api('docs?coll=eq.'+c+'&id=eq.'+id,{method:'DELETE'}).catch(bad);if(c==='questions')api('docs?coll=eq.keys&id=eq.'+id,{method:'DELETE'}).catch(()=>{})};
+  const out=()=>{saveS(null);setUid(null);setReady(true);setPg({n:'dash'})};
+  const me=d.users.find(u=>u.id===uidS), adm=me&&me.role==='admin';
+  const go=(n,x)=>{setPg({n,...x});window.scrollTo(0,0)};
+  if(!uidS)return h(Login,{onLogin:u=>{setReady(false);setUid(u)}});
+  if(!ready)return h('div',{className:'min-h-screen grid place-items-center text-stone-400 text-sm'},'Memuat data…');
+  if(!me)return h('div',{className:'min-h-screen grid place-items-center px-4 text-center'},h('div',null,h('p',{className:'mb-4 text-stone-600'},'Akun Anda belum aktif atau sudah dinonaktifkan oleh guru.'),h('p',{className:'mb-4 text-xs text-stone-500 break-all max-w-md mx-auto'},'Detail teknis: ',err||'(belum ada respons)',h('br'),'ID akun: ',uidS),B({className:bS,onClick:out},'Keluar')));
+  const nav=adm?[['dash','Beranda'],['soal','Bank Soal'],['jadwal','Jadwal'],['peserta','Peserta'],['rekap','Rekap']]:[['dash','Beranda'],['ujian','Ujian'],['rekap','Nilai Saya']];
+  const ctx={d,put,rm,upd,me,adm,go};
+  const page={dash:Dash,soal:Soal,jadwal:Jadwal,peserta:Peserta,ujian:Ujian,room:Room,rekap:Rekap,report:Report,cert:Cert}[pg.n]||Dash;
+  return h('div',null,
+    h('header',{className:'np bg-white border-b border-stone-200 sticky top-0 z-10'},h('div',{className:'max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2'},
+      h('span',{className:'font-semibold tracking-tight'},'Ujian',h('span',{className:'text-emerald-700'},'Online')),
+      h('nav',{className:'flex gap-1 text-sm flex-1 overflow-x-auto'},nav.map(([k,t])=>B({key:k,onClick:()=>go(k),className:'px-3 py-1.5 rounded-lg '+(pg.n===k?'bg-emerald-50 text-emerald-800':'text-stone-600 hover:bg-stone-100')},t))),
+      h('div',{className:'flex items-center gap-2 text-sm'},h('span',{className:'w-2 h-2 rounded-full bg-emerald-500'}),h('span',{className:'text-stone-600'},me.name,' · ',adm?'Guru':'Peserta'),B({className:bS,onClick:out},'Keluar')))),
+    h('main',{className:'max-w-5xl mx-auto px-4 py-8'},h(page,{...ctx,p:pg}),h('p',{className:'np text-center text-xs text-stone-400 mt-10'},'Terhubung ke database online · data tersimpan otomatis')));
+}
+
+function Login({onLogin}){
+  const [u,setU]=useState(''),[p,setP]=useState(''),[nm,setNm]=useState(''),[err,setErr]=useState(''),[setup,setSetup]=useState(false),[busy,setBusy]=useState(false);
+  const sub=async e=>{e.preventDefault();setErr('');
+    if(!SUPA.url){setErr('Isi SUPA.url dan SUPA.key di bagian atas file terlebih dahulu.');return}
+    if(!/^[a-z0-9._-]{3,}$/i.test(u.trim())){setErr('Username minimal 3 karakter (huruf/angka/titik/strip).');return}
+    setBusy(true);
+    try{
+      if(setup){if(p.length<6)throw new Error('Password minimal 6 karakter.');
+        const j=await auth('signup',{email:EM(u),password:p});if(!j.access_token)throw new Error('Nonaktifkan "Confirm email" di Supabase (Authentication → Sign In / Providers → Email).');
+        saveS(mk(j));
+        try{await api('docs',{method:'POST',body:JSON.stringify({coll:'users',id:j.user.id,data:{name:nm.trim()||'Guru',username:u.trim().toLowerCase(),role:'admin'}})})}
+        catch(x){saveS(null);throw new Error('Akun guru sudah pernah dibuat. Silakan masuk.')}
+        onLogin(j.user.id)}
+      else{const j=await auth('token?grant_type=password',{email:EM(u),password:p});saveS(mk(j));onLogin(j.user.id)}
+    }catch(ex){setErr(/Invalid login/i.test(ex.message)?'Username atau password salah.':ex.message)}
+    setBusy(false)};
+  return h('div',{className:'min-h-screen grid place-items-center px-4'},h('div',{className:'w-full max-w-sm'},
+    h('h1',{className:'text-2xl font-semibold text-center mb-1'},'Ujian',h('span',{className:'text-emerald-700'},'Online')),
+    h('p',{className:'text-center text-sm text-stone-500 mb-6'},setup?'Buat akun guru pertama':'Masuk untuk melanjutkan'),
+    h('form',{onSubmit:sub,className:'sheet p-6 space-y-4'},
+      setup&&h('div',null,L('Nama guru'),h('input',{className:inp,value:nm,onChange:e=>setNm(e.target.value)})),
+      h('div',null,L('Username'),h('input',{className:inp,value:u,onChange:e=>setU(e.target.value),autoCapitalize:'none',autoFocus:true})),
+      h('div',null,L('Password'),h('input',{className:inp,type:'password',value:p,onChange:e=>setP(e.target.value)})),
+      err&&h('p',{className:'text-sm text-red-600'},err),
+      h('button',{className:bP+' w-full',disabled:busy},busy?'Memproses…':setup?'Buat akun guru':'Masuk')),
+    h('p',{className:'text-center text-xs text-stone-400 mt-5'},B({className:'underline',onClick:()=>{setSetup(!setup);setErr('')}},setup?'Kembali ke halaman masuk':'Pertama kali memakai aplikasi? Buat akun guru'))))
+}
+
+const Stat=(t,v,s)=>h(Card,{key:t,cls:'!p-4'},h('div',{className:'text-xs text-stone-500'},t),h('div',{className:'text-2xl font-semibold mt-1'},v),s&&h('div',{className:'text-xs text-stone-400 mt-1'},s));
+function Dash({d,me,adm,go,put}){
+  const done=d.results.filter(r=>r.status==='done'&&(adm||r.uid===me.id));
+  return h('div',null,Title('Halo, '+me.name.split(' ')[0],adm?'Ringkasan sistem ujian':'Ringkasan ujian Anda'),
+    h('div',{className:'grid grid-cols-2 md:grid-cols-4 gap-3 mb-6'},
+      adm&&Stat('Bank soal',d.questions.length,CATS.map(c=>c+' '+d.questions.filter(q=>q.cat===c).length).join(' · ')),
+      Stat('Jumlah ujian',d.exams.length,CATS.map(c=>c+' '+d.exams.filter(q=>q.cat===c).length).join(' · ')),
+      Stat('Rata-rata nilai',avg(done.map(r=>r.score)),done.length+' hasil'),
+      adm?Stat('Peserta',d.users.filter(u=>u.role==='peserta').length):Stat('Ujian selesai',done.length)),
+    h(Card,null,adm&&!d.questions.length&&B({className:bP+' mb-4',onClick:()=>{const s=seedData();s.questions.forEach(o=>put('questions',o));s.exams.forEach(o=>put('exams',o))}},'Muat contoh soal & jadwal'),h('div',{className:'text-sm font-medium mb-3'},'Akses cepat'),h('div',{className:'flex flex-wrap gap-2'},
+      adm?[['soal','Kelola bank soal'],['jadwal','Atur jadwal ujian'],['peserta','Akun peserta'],['rekap','Rekap nilai']].map(([k,t])=>B({key:k,className:bS,onClick:()=>go(k)},t))
+         :[['ujian','Masuk room ujian'],['rekap','Lihat nilai saya']].map(([k,t])=>B({key:k,className:bS,onClick:()=>go(k)},t)))))
+}
+
+function Soal({d,put,rm}){
+  const [f,setF]=useState('Semua'),[ed,setEd]=useState(null);
+  const list=d.questions.filter(q=>f==='Semua'||q.cat===f);
+  const blank={cat:'Harian',type:'pg',text:'',options:['','','',''],answer:0,weight:1};
+  return h('div',null,Title('Bank Soal',d.questions.length+' pertanyaan',
+      h('select',{className:inp+' !w-auto',value:f,onChange:e=>setF(e.target.value)},['Semua',...CATS].map(c=>h('option',{key:c},c))),
+      B({className:bP,onClick:()=>setEd({...blank})},'+ Tambah soal')),
+    ed&&h(Card,{cls:'mb-5'},h('div',{className:'grid md:grid-cols-4 gap-3'},
+      h('div',null,L('Jenis ujian'),h('select',{className:inp,value:ed.cat,onChange:e=>setEd({...ed,cat:e.target.value})},CATS.map(c=>h('option',{key:c},c)))),
+      h('div',null,L('Tipe soal'),h('select',{className:inp,value:ed.type,onChange:e=>setEd({...ed,type:e.target.value,answer:e.target.value==='pg'?0:'',options:e.target.value==='pg'?(ed.options.length?ed.options:['','','','']):[]})},h('option',{value:'pg'},'Pilihan ganda'),h('option',{value:'isian'},'Isian singkat'))),
+      h('div',null,L('Bobot nilai'),h('input',{className:inp,type:'number',min:1,value:ed.weight,onChange:e=>setEd({...ed,weight:+e.target.value})})),
+      ed.type==='isian'&&h('div',null,L('Kunci jawaban'),h('input',{className:inp,value:ed.answer,onChange:e=>setEd({...ed,answer:e.target.value})}))),
+      h('div',{className:'mt-3'},L('Teks pertanyaan'),h('textarea',{className:inp,rows:3,value:ed.text,onChange:e=>setEd({...ed,text:e.target.value})})),
+      ed.type==='pg'&&h('div',{className:'mt-3 space-y-2'},L('Pilihan (pilih bulatan untuk kunci jawaban)'),ed.options.map((o,i)=>h('div',{key:i,className:'flex items-center gap-2'},
+        h('input',{type:'radio',checked:+ed.answer===i,onChange:()=>setEd({...ed,answer:i})}),
+        h('input',{className:inp,value:o,placeholder:'Pilihan '+'ABCDEF'[i],onChange:e=>setEd({...ed,options:ed.options.map((x,j)=>j===i?e.target.value:x)})}),
+        ed.options.length>2&&B({className:bS,onClick:()=>setEd({...ed,options:ed.options.filter((_,j)=>j!==i),answer:+ed.answer>=i&&+ed.answer>0?+ed.answer-1:ed.answer})},'−'))),
+        ed.options.length<6&&B({className:bS,onClick:()=>setEd({...ed,options:[...ed.options,'']})},'+ Pilihan')),
+      h('div',{className:'flex gap-2 mt-4'},B({className:bP,disabled:!ed.text.trim()||(ed.type==='pg'?ed.options.some(o=>!o.trim()):!String(ed.answer).trim()),onClick:()=>{put('questions',ed);setEd(null)}},'Simpan'),B({className:bS,onClick:()=>setEd(null)},'Batal'))),
+    h('div',{className:'space-y-2'},list.map((q,i)=>h(Card,{key:q.id,cls:'!p-4 flex gap-3 items-start'},
+      h('div',{className:'text-xs text-stone-400 w-5 pt-0.5'},i+1),
+      h('div',{className:'flex-1 min-w-0'},h('div',{className:'text-sm'},q.text),
+        h('div',{className:'text-xs text-stone-500 mt-1'},q.cat,' · ',q.type==='pg'?'Pilihan ganda':'Isian',' · bobot ',q.weight,' · kunci: ',h('b',null,q.type==='pg'?'ABCDEF'[q.answer]+'. '+q.options[q.answer]:q.answer))),
+      h('div',{className:'flex gap-1'},B({className:bS,onClick:()=>setEd({...q})},'Edit'),B({className:bS+' text-red-600',onClick:()=>confirm('Hapus pertanyaan ini?')&&rm('questions',q.id)},'Hapus')))),
+      !list.length&&h('p',{className:'text-sm text-stone-400 text-center py-8'},'Belum ada soal.')))
+}
+
+function Jadwal({d,put,rm}){
+  const [ed,setEd]=useState(null),now=Date.now();
+  const open=()=>setEd({cat:'Harian',title:'',start:now,end:now+7*864e5,duration:30,kkm:70,announced:false,qids:d.questions.filter(q=>q.cat==='Harian').map(q=>q.id)});
+  const pool=ed?d.questions.filter(q=>q.cat===ed.cat):[];
+  return h('div',null,Title('Jadwal Ujian','Atur waktu, durasi, dan batas kelulusan',B({className:bP,onClick:open},'+ Buat jadwal')),
+    ed&&h(Card,{cls:'mb-5'},h('div',{className:'grid md:grid-cols-3 gap-3'},
+      h('div',{className:'md:col-span-2'},L('Judul ujian'),h('input',{className:inp,value:ed.title,onChange:e=>setEd({...ed,title:e.target.value})})),
+      h('div',null,L('Jenis'),h('select',{className:inp,value:ed.cat,onChange:e=>setEd({...ed,cat:e.target.value,qids:d.questions.filter(q=>q.cat===e.target.value).map(q=>q.id)})},CATS.map(c=>h('option',{key:c},c)))),
+      h('div',null,L('Mulai'),h('input',{className:inp,type:'datetime-local',value:toL(ed.start),onChange:e=>e.target.value&&setEd({...ed,start:new Date(e.target.value).getTime()})})),
+      h('div',null,L('Selesai'),h('input',{className:inp,type:'datetime-local',value:toL(ed.end),onChange:e=>e.target.value&&setEd({...ed,end:new Date(e.target.value).getTime()})})),
+      h('div',{className:'grid grid-cols-2 gap-3'},h('div',null,L('Durasi (menit)'),h('input',{className:inp,type:'number',min:1,value:ed.duration,onChange:e=>setEd({...ed,duration:+e.target.value})})),
+        h('div',null,L('Batas lulus (KKM)'),h('input',{className:inp,type:'number',min:0,max:100,value:ed.kkm,onChange:e=>setEd({...ed,kkm:+e.target.value})})))),
+      h('div',{className:'mt-4'},L('Soal yang dipakai ('+ed.qids.length+' dipilih)'),
+        h('div',{className:'max-h-48 overflow-auto border border-stone-200 rounded-lg divide-y'},pool.map(q=>h('label',{key:q.id,className:'flex gap-2 p-2 text-sm'},
+          h('input',{type:'checkbox',checked:ed.qids.includes(q.id),onChange:e=>setEd({...ed,qids:e.target.checked?[...ed.qids,q.id]:ed.qids.filter(x=>x!==q.id)})}),q.text)),!pool.length&&h('p',{className:'p-3 text-sm text-stone-400'},'Belum ada soal untuk jenis ini.'))),
+      h('div',{className:'flex gap-2 mt-4'},B({className:bP,disabled:!ed.title.trim()||!ed.qids.length||ed.end<=ed.start,onClick:()=>{put('exams',ed);setEd(null)}},'Simpan'),B({className:bS,onClick:()=>setEd(null)},'Batal'))),
+    h('div',{className:'space-y-2'},d.exams.slice().sort((a,b)=>b.start-a.start).map(e=>h(Card,{key:e.id,cls:'!p-4 flex flex-wrap gap-3 items-center'},
+      h('div',{className:'flex-1 min-w-[200px]'},h('div',{className:'text-sm font-medium'},e.title,' ',h('span',{className:'text-xs bg-stone-100 rounded px-2 py-0.5 ml-1'},e.cat)),
+        h('div',{className:'text-xs text-stone-500 mt-1'},fmt(e.start),' – ',fmt(e.end),' · ',e.duration,' mnt · KKM ',e.kkm,' · ',e.qids.length,' soal')),
+      B({className:bS+(e.announced?' !border-emerald-600 text-emerald-800':''),onClick:()=>put('exams',{...e,announced:!e.announced})},e.announced?'✓ Hasil diumumkan':'Umumkan hasil'),
+      B({className:bS,onClick:()=>setEd({...e})},'Edit'),B({className:bS+' text-red-600',onClick:()=>confirm('Hapus jadwal ini?')&&rm('exams',e.id)},'Hapus')))))
+}
+
+function Peserta({d,put,rm}){
+  const [f,setF]=useState({name:'',username:'',password:''}),[err,setErr]=useState(''),[busy,setBusy]=useState(false);
+  const un=f.username.trim().toLowerCase(),dup=d.users.some(u=>u.username===un),okU=/^[a-z0-9._-]{3,}$/.test(un);
+  const add=async()=>{setBusy(true);setErr('');try{const j=await auth('signup',{email:EM(un),password:f.password});if(!j.user)throw new Error('Gagal membuat akun');
+    put('users',{id:j.user.id,name:f.name.trim(),username:un,role:'peserta'});setF({name:'',username:'',password:''})}catch(e){setErr(e.message)}setBusy(false)};
+  return h('div',null,Title('Akun Peserta',d.users.filter(u=>u.role==='peserta').length+' peserta terdaftar'),
+    h(Card,{cls:'mb-5'},h('div',{className:'grid md:grid-cols-4 gap-3 items-end'},
+      h('div',null,L('Nama lengkap'),h('input',{className:inp,value:f.name,onChange:e=>setF({...f,name:e.target.value})})),
+      h('div',null,L('Username'),h('input',{className:inp,value:f.username,autoCapitalize:'none',onChange:e=>setF({...f,username:e.target.value})})),
+      h('div',null,L('Password (min. 6)'),h('input',{className:inp,value:f.password,onChange:e=>setF({...f,password:e.target.value})})),
+      B({className:bP,disabled:busy||!f.name.trim()||!okU||f.password.length<6||dup,onClick:add},busy?'Membuat…':'Buat akun')),
+      dup&&h('p',{className:'text-xs text-red-600 mt-2'},'Username sudah dipakai.'),err&&h('p',{className:'text-xs text-red-600 mt-2'},err),
+      h('p',{className:'text-xs text-stone-400 mt-2'},'Catat password dan berikan ke peserta. Reset password dilakukan lewat dashboard Supabase (Authentication → Users).')),
+    h(Card,{cls:'!p-0 overflow-x-auto'},h('table',{className:'w-full text-sm'},h('thead',null,h('tr',{className:'text-left text-xs text-stone-500 border-b'},['Nama','Username','Peran',''].map(t=>h('th',{key:t,className:'p-3 font-normal'},t)))),
+      h('tbody',null,d.users.map(u=>h('tr',{key:u.id,className:'border-b last:border-0'},h('td',{className:'p-3'},u.name),h('td',{className:'p-3'},u.username),h('td',{className:'p-3'},u.role==='admin'?'Guru':'Peserta'),
+        h('td',{className:'p-3 text-right'},u.role!=='admin'&&B({className:'text-red-600 text-xs',onClick:()=>confirm('Nonaktifkan akun '+u.name+'?')&&rm('users',u.id)},'Nonaktifkan'))))))))
+}
+
+function Ujian({d,me,go,put}){
+  const now=Date.now();
+  return h('div',null,Title('Room Ujian','Ujian yang tersedia untuk Anda'),h('div',{className:'grid md:grid-cols-2 gap-3'},d.exams.slice().sort((a,b)=>a.start-b.start).map(e=>{
+    const r=d.results.find(x=>x.eid===e.id&&x.uid===me.id),live=now>=e.start&&now<=e.end,exp=r&&r.status==='progress'&&now>r.start+e.duration*6e4;
+    let act;
+    if(r&&r.status==='done')act=e.announced?B({className:bS,onClick:()=>go('report',{rid:r.id})},'Lihat hasil · '+r.score):h('span',{className:'text-xs text-stone-500'},'Selesai · menunggu pengumuman');
+    else if(live||(r&&r.status==='progress'))act=B({className:bP,onClick:()=>go('room',{eid:e.id})},r?'Lanjutkan':'Mulai ujian');
+    else act=h('span',{className:'text-xs text-stone-500'},now<e.start?'Belum dibuka':'Sudah ditutup');
+    return h(Card,{key:e.id,cls:'!p-4'},h('div',{className:'flex justify-between'},h('div',{className:'font-medium text-sm'},e.title),h('span',{className:'text-xs bg-stone-100 rounded px-2 py-0.5'},e.cat)),
+      h('div',{className:'text-xs text-stone-500 my-2'},fmt(e.start),' – ',fmt(e.end),h('br'),e.duration,' menit · ',e.qids.length,' soal · KKM ',e.kkm),act)})))
+}
+
+function Room({d,me,p,put,go,upd}){
+  const e=d.exams.find(x=>x.id===p.eid);
+  const qs=e?e.qids.map(i=>d.questions.find(q=>q.id===i)).filter(Boolean):[];
+  const [i,setI]=useState(0),[left,setLeft]=useState(null),made=useRef(false),sub=useRef(false);
+  const r=d.results.find(x=>x.eid===p.eid&&x.uid===me.id);
+  useEffect(()=>{if(e&&!r&&!made.current){made.current=true;put('results',{id:me.id+'_'+e.id,uid:me.id,eid:e.id,start:Date.now(),status:'progress',answers:{}})}},[e,r]);
+  const finish=async()=>{if(sub.current||!r)return;sub.current=true;try{await upsert('results',r.id,r);const res=await api('rpc/submit_exam',{method:'POST',body:JSON.stringify({rid:r.id})});upd('results',{...res,id:r.id});go('report',{rid:r.id,fresh:1})}catch(e){sub.current=false;alert('Gagal mengumpulkan ujian. Periksa koneksi lalu coba lagi.')}};
+  useEffect(()=>{if(!r||r.status==='done')return;const t=setInterval(()=>{const l=r.start+e.duration*6e4-Date.now();setLeft(Math.max(0,l));if(l<=0)finish()},500);return()=>clearInterval(t)});
+  if(!e)return h('p',null,'Ujian tidak ditemukan.');
+  if(!r)return h('p',{className:'text-stone-400'},'Menyiapkan ujian…');
+  if(r.status==='done')return h('div',null,h('p',null,'Ujian ini sudah selesai.'),B({className:bS,onClick:()=>go('ujian')},'Kembali'));
+  const q=qs[i],a=r.answers[q.id],set=v=>put('results',{...r,answers:{...r.answers,[q.id]:v}});
+  const mm=left==null?'--:--':String(Math.floor(left/6e4)).padStart(2,'0')+':'+String(Math.floor(left%6e4/1e3)).padStart(2,'0');
+  return h('div',{className:'max-w-2xl mx-auto'},
+    h('div',{className:'flex justify-between items-center mb-4'},h('div',null,h('div',{className:'font-medium'},e.title),h('div',{className:'text-xs text-stone-500'},'Soal ',i+1,' dari ',qs.length)),
+      h('div',{className:'font-mono text-lg '+(left!=null&&left<6e4?'text-red-600':'text-stone-700')},mm)),
+    h(Card,{cls:'!p-6'},h('p',{className:'mb-5 leading-relaxed'},q.text),
+      q.type==='pg'?h('div',{className:'space-y-2'},q.options.map((o,j)=>h('label',{key:j,className:'flex gap-3 items-center border rounded-lg p-3 text-sm cursor-pointer '+(+a===j&&a!==undefined?'border-emerald-600 bg-emerald-50':'border-stone-200 hover:bg-stone-50')},
+        h('input',{type:'radio',checked:a!==undefined&&+a===j,onChange:()=>set(j)}),h('span',{className:'text-stone-400'},'ABCDEF'[j]),o)))
+      :h('input',{className:inp,placeholder:'Ketik jawaban…',value:a||'',onChange:ev=>set(ev.target.value)})),
+    h('div',{className:'flex justify-between mt-4'},B({className:bS,disabled:i===0,onClick:()=>setI(i-1)},'← Sebelumnya'),
+      i<qs.length-1?B({className:bP,onClick:()=>setI(i+1)},'Berikutnya →'):B({className:bP,onClick:()=>{const kosong=qs.filter(x=>r.answers[x.id]===undefined||r.answers[x.id]==='').length;if(confirm(kosong?kosong+' soal belum dijawab. Selesaikan ujian?':'Selesaikan ujian sekarang?'))finish()}},'Selesai & kumpulkan')),
+    h('div',{className:'flex flex-wrap gap-1.5 mt-6 justify-center'},qs.map((x,j)=>B({key:x.id,onClick:()=>setI(j),className:'w-8 h-8 rounded-lg text-xs border '+(j===i?'border-emerald-700 text-emerald-800 font-semibold':r.answers[x.id]!==undefined&&r.answers[x.id]!==''?'bg-emerald-50 border-emerald-200':'border-stone-200')},j+1))),
+    h('p',{className:'text-center text-xs text-stone-400 mt-4'},'Jawaban tersimpan otomatis.'))
+}
+
+function Report({d,me,adm,p,go,put}){
+  const r=d.results.find(x=>x.id===p.rid),e=r&&d.exams.find(x=>x.id===r.eid),u=r&&d.users.find(x=>x.id===r.uid),[edit,setEdit]=useState(false),[K,setK]=useState(null);
+  useEffect(()=>{if(e&&!adm&&e.announced)api('rpc/get_keys',{method:'POST',body:JSON.stringify({eid:e.id})}).then(setK).catch(()=>setK({}))},[e&&e.id,e&&e.announced]);
+  if(!r||!e||!u)return h('p',null,'Data tidak ditemukan.');
+  if(!adm&&!e.announced)return h(Card,null,'Hasil ujian ini belum diumumkan oleh guru.');
+  if(!adm&&!K)return h('p',{className:'text-stone-400'},'Memuat hasil…');
+  const qs=e.qids.map(i=>d.questions.find(q=>q.id===i)).filter(Boolean).map(q=>adm?q:{...q,answer:K[q.id]}),lulus=r.score>=e.kkm;
+  const show=(q,a)=>a===undefined||a===''?'(kosong)':q.type==='pg'?'ABCDEF'[a]+'. '+q.options[a]:a;
+  return h('div',null,Title('Lembar Hasil','',B({className:bS,onClick:()=>go(adm?'rekap':'ujian')},'← Kembali'),B({className:bS,onClick:()=>setEdit(!edit)},edit?'Selesai edit':'Edit laporan'),
+      lulus&&B({className:bS,onClick:()=>go('cert',{rid:r.id})},'Sertifikat'),B({className:bP,onClick:()=>window.print()},'Cetak / PDF')),
+    h('div',{className:'sheet p-8',contentEditable:edit,suppressContentEditableWarning:true},
+      h('div',{className:'text-center border-b pb-4 mb-5'},h('div',{className:'text-xs tracking-widest text-stone-500'},'LAPORAN HASIL UJIAN'),h('div',{className:'text-xl font-semibold mt-1'},e.title)),
+      h('div',{className:'grid grid-cols-2 gap-y-1 text-sm mb-5'},[['Nama peserta',u.name],['Jenis ujian',e.cat],['Tanggal',fmtD(r.date||r.start)],['Batas lulus (KKM)',e.kkm],['Nilai akhir',r.score+' ('+pred(r.score)+')'],['Status',lulus?'LULUS':'TIDAK LULUS']].map(([k,v])=>h('div',{key:k,className:'flex gap-2'},h('span',{className:'text-stone-500 w-36'},k),h('b',null,v)))),
+      h('table',{className:'w-full text-sm'},h('thead',null,h('tr',{className:'text-left text-xs text-stone-500 border-b'},['No','Pertanyaan','Jawaban','Kunci','Hasil'].map(t=>h('th',{key:t,className:'py-2 pr-2 font-normal'},t)))),
+        h('tbody',null,qs.map((q,i)=>{const a=r.answers[q.id],g=ok(q,a);return h('tr',{key:q.id,className:'border-b align-top'},h('td',{className:'py-2 pr-2'},i+1),h('td',{className:'py-2 pr-2'},q.text),h('td',{className:'py-2 pr-2'},show(q,a)),h('td',{className:'py-2 pr-2'},show(q,q.answer)),h('td',{className:'py-2 font-medium '+(g?'text-emerald-700':'text-red-600')},g?'Benar':'Salah'))}))),
+      h('p',{className:'text-xs text-stone-500 mt-4'},'Benar ',qs.filter(q=>ok(q,r.answers[q.id])).length,' dari ',qs.length,' soal.')))
+}
+
+function Rekap({d,me,adm,go}){
+  const [c,setC]=useState('Semua'),[n,setN]=useState('');
+  const ps=d.users.filter(u=>u.role==='peserta'&&(adm||u.id===me.id)&&u.name.toLowerCase().includes(n.toLowerCase()));
+  const rows=ps.map(u=>{const rs=d.results.filter(r=>r.uid===u.id&&r.status==='done'&&(adm||(d.exams.find(e=>e.id===r.eid)||{}).announced)).map(r=>({...r,e:d.exams.find(e=>e.id===r.eid)})).filter(r=>r.e&&(c==='Semua'||r.e.cat===c)).sort((a,b)=>a.date-b.date);
+    return {u,rs,max:rs.length?Math.max(...rs.map(r=>r.score)):null,av:avg(rs.map(r=>r.score))}});
+  return h('div',null,Title(adm?'Rekap Nilai Peserta':'Nilai Saya','Nilai, rata-rata, dan riwayat percobaan',
+      adm&&h('input',{className:inp+' !w-44',placeholder:'Cari nama…',value:n,onChange:e=>setN(e.target.value)}),
+      h('select',{className:inp+' !w-auto',value:c,onChange:e=>setC(e.target.value)},['Semua',...CATS].map(x=>h('option',{key:x},x))),
+      adm&&B({className:bP,onClick:()=>window.print()},'Cetak / PDF')),
+    h(Card,{cls:'!p-0 overflow-x-auto'},h('div',{className:'hidden print:block p-4 font-semibold'},'Rekap Nilai Peserta — ',c),
+      h('table',{className:'w-full text-sm'},h('thead',null,h('tr',{className:'text-left text-xs text-stone-500 border-b'},['Peserta','Percobaan','Tertinggi','Rata-rata','Riwayat'].map(t=>h('th',{key:t,className:'p-3 font-normal'},t)))),
+        h('tbody',null,rows.map(({u,rs,max,av})=>h('tr',{key:u.id,className:'border-b last:border-0 align-top'},h('td',{className:'p-3 font-medium'},u.name),h('td',{className:'p-3'},rs.length),h('td',{className:'p-3'},max==null?'–':max),h('td',{className:'p-3'},rs.length?av:'–'),
+          h('td',{className:'p-3'},h('div',{className:'flex flex-wrap gap-1'},rs.map(r=>B({key:r.id,onClick:()=>go('report',{rid:r.id}),title:r.e.title,className:'np:inline text-xs border rounded px-2 py-0.5 hover:bg-stone-50 '+(r.score>=r.e.kkm?'border-emerald-300 text-emerald-800':'border-red-200 text-red-600')},r.e.cat+' · '+r.score)),!rs.length&&h('span',{className:'text-stone-400'},'Belum ada'))))),
+          !rows.length&&h('tr',null,h('td',{colSpan:5,className:'p-8 text-center text-stone-400'},'Tidak ada data.'))))))
+}
+
+function Cert({d,p,go}){
+  const r=d.results.find(x=>x.id===p.rid),e=r&&d.exams.find(x=>x.id===r.eid),u=r&&d.users.find(x=>x.id===r.uid);
+  if(!r||!e||!u)return h('p',null,'Data tidak ditemukan.');
+  return h('div',null,h('style',null,'@media print{@page{size:A4 landscape;margin:0}main{padding:0!important;max-width:none!important}}'),
+    Title('Sertifikat','Klik teks pada sertifikat untuk mengubahnya sebelum dicetak.',B({className:bS,onClick:()=>go('report',{rid:r.id})},'← Kembali'),B({className:bP,onClick:()=>window.print()},'Cetak / Simpan PDF')),
+    h('div',{className:'sheet mx-auto text-center p-3',style:{maxWidth:900,aspectRatio:'1.414'}},
+      h('div',{className:'h-full border-2 border-emerald-800 p-2'},h('div',{className:'h-full border border-emerald-800 flex flex-col items-center justify-center px-6 gap-3',contentEditable:true,suppressContentEditableWarning:true},
+        h('div',{className:'text-xs tracking-[.4em] text-emerald-800'},'SERTIFIKAT'),
+        h('div',{className:'text-sm text-stone-500'},'Diberikan kepada'),
+        h('div',{className:'text-3xl md:text-4xl font-serif border-b border-stone-300 px-8 pb-1'},u.name),
+        h('div',{className:'text-sm text-stone-600 max-w-md'},'atas keberhasilan menyelesaikan ',h('b',null,e.title),' (Ujian ',e.cat,') dengan nilai'),
+        h('div',{className:'text-4xl font-semibold text-emerald-800'},r.score),
+        h('div',{className:'text-sm tracking-wide'},'Predikat: ',h('b',null,pred(r.score))),
+        h('div',{className:'text-xs text-stone-500 mt-2'},fmtD(r.date||r.start)),
+        h('div',{className:'mt-4 text-xs text-stone-500'},h('div',{className:'w-40 border-t border-stone-400 pt-1 mx-auto'},'Guru Pengajar'))))))
+}
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script></body></html>
